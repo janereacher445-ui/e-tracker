@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>E-Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one calm column. Sticky tabs, summary tiles first, then the estimate-vs-measured chart, then logs. */
+:root {
+  --bg: #f4f2f7;
+  --surface: #fdfcfe;
+  --surface-2: #eeeaf3;
+  --ink: #1b1622;
+  --ink-2: #4f475a;
+  --muted: #736b7f;
+  --line: #e3deea;
+  --axis: #c9c2d3;
+  --accent: #6250d6;        /* also the estimate series */
+  --accent-ink: #ffffff;
+  --accent-soft: #ebe8fb;
+  --measured: #eb6834;      /* blood test series */
+  --danger: #c23434;
+  --danger-soft: #fbe9e7;
+  --font-display: "Bricolage Grotesque", "Figtree", system-ui, sans-serif;
+  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius: 14px;
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131017; --surface: #1d1922; --surface-2: #27222e; --ink: #efeaf4; --ink-2: #c5bdd0;
+    --muted: #9a92a6; --line: #2f2937; --axis: #4a4256; --accent: #9085e9; --accent-ink: #141118;
+    --accent-soft: #2a2547; --measured: #d95926; --danger: #e66767; --danger-soft: #3a1f22;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131017; --surface: #1d1922; --surface-2: #27222e; --ink: #efeaf4; --ink-2: #c5bdd0;
+  --muted: #9a92a6; --line: #2f2937; --axis: #4a4256; --accent: #9085e9; --accent-ink: #141118;
+  --accent-soft: #2a2547; --measured: #d95926; --danger: #e66767; --danger-soft: #3a1f22;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+[hidden] { display: none !important; }
+.wrap { max-width: 940px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 19px; font-weight: 700; }
+h3 { font-size: 15px; font-weight: 700; font-family: var(--font-body); }
+p { margin: 0; }
+a { color: var(--accent); }
+.num { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.top { padding-block: 18px 10px; }
+.top .wrap { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sync { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.sync i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.sync[data-s="synced"] i { background: var(--accent); }
+
+.tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+.tabs .wrap { display: flex; gap: 4px; }
+.tabs a { flex: 1 1 0; min-width: 0; text-align: center; padding: 11px 4px 10px; text-decoration: none; color: var(--ink-2); font-weight: 600; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+
+main { padding-block: 20px 28px; }
+.stack { display: flex; flex-direction: column; gap: 18px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; min-width: 0; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.sub { color: var(--muted); font-size: 13.5px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tile .label { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.tile .value { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; letter-spacing: -0.01em; }
+.tile .value small { font-family: var(--font-body); font-size: 14px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+.tile .foot { margin-top: auto; padding-top: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); }
+.pill.now { background: var(--accent-soft); color: var(--ink); }
+.pill.late { background: var(--danger-soft); color: var(--danger); }
+
+button, .btn { font: inherit; font-weight: 600; font-size: 14px; border-radius: 10px; border: 1px solid var(--axis); background: var(--surface); color: var(--ink); padding: 8px 14px; cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+button.quiet { border-color: transparent; background: transparent; color: var(--accent); padding: 6px 8px; }
+button.danger { color: var(--danger); }
+button.danger[data-armed] { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+.controls { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; }
+.seg button { border: 0; background: transparent; padding: 5px 11px; font-size: 13px; border-radius: 8px; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.check { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-2); }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); margin-bottom: 4px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.k-line { width: 16px; height: 2px; background: var(--accent); border-radius: 2px; }
+.k-band { width: 14px; height: 10px; background: var(--accent); opacity: 0.16; border-radius: 2px; }
+.k-dot { width: 10px; height: 10px; background: var(--measured); border-radius: 50%; }
+.k-tick { width: 3px; height: 9px; background: var(--ink-2); border-radius: 2px; }
+.k-target { width: 14px; height: 10px; background: var(--ink-2); opacity: 0.14; border-radius: 2px; }
+#chart { position: relative; touch-action: pan-y; }
+#chart svg { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+.tip { position: absolute; top: 4px; pointer-events: none; background: var(--surface); border: 1px solid var(--axis); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; line-height: 1.4; box-shadow: 0 6px 18px rgba(20, 12, 40, 0.14); min-width: 150px; z-index: 2; }
+.tip .d { color: var(--muted); }
+.tip .r { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tip .r b { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tip .r span { color: var(--ink-2); }
+.empty { color: var(--muted); padding: 22px 4px; text-align: center; font-size: 14px; }
+
+.rows { display: flex; flex-direction: column; }
+.rowi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
+.rowi:first-child { border-top: 0; }
+.rowi .when { font-weight: 600; }
+.rowi .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--ink-2); font-size: 14px; align-items: center; }
+.rowi .note { color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
+.sites { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.site { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.site.next { border-color: var(--accent); background: var(--accent-soft); }
+.site b { display: block; overflow-wrap: anywhere; }
+.site span { font-size: 13px; color: var(--ink-2); }
+
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 6px 12px 6px 0; white-space: nowrap; }
+td { padding: 10px 12px 10px 0; border-top: 1px solid var(--line); vertical-align: top; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.extra { border-top: 0; padding-top: 0; white-space: normal; color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
+td strong { font-weight: 700; }
+@media (max-width: 680px) {
+  .tablewrap thead { display: none; }
+  .tablewrap tr { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .tablewrap tbody tr:first-child { border-top: 0; padding-top: 0; }
+  .tablewrap tr.extra-row { border-top: 0; padding-top: 0; margin-top: -6px; display: block; }
+  .tablewrap td { border: 0; padding: 0; white-space: normal; }
+  .tablewrap td[data-l]::before { content: attr(data-l); display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .tablewrap td.wide { grid-column: 1 / -1; }
+  .tablewrap td.edit { text-align: right; align-self: end; }
+}
+
+.form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field label, fieldset legend { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.field .hint { font-size: 12.5px; color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+input[type="text"], input[type="datetime-local"], input[type="time"], select, textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 10px; padding: 9px 11px; width: 100%; min-width: 0; }
+textarea { resize: vertical; }
+.unitrow { display: flex; gap: 6px; }
+.unitrow select { width: auto; flex: 0 0 auto; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { position: relative; display: inline-flex; }
+.chip input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.chip span { border: 1px solid var(--axis); border-radius: 999px; padding: 5px 12px; font-size: 14px; font-weight: 500; }
+.chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.actions .grow { flex: 1; }
+.err { color: var(--danger); font-size: 13.5px; font-weight: 600; }
+dialog { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 20px; width: min(520px, calc(100vw - 24px)); max-height: calc(100% - 24px); overflow: auto; }
+dialog::backdrop { background: rgba(15, 10, 25, 0.5); }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 999px; font-size: 14px; font-weight: 600; z-index: 20; max-width: calc(100vw - 32px); text-align: center; }
+footer { color: var(--muted); font-size: 12.5px; padding-block: 0 28px; }
+footer p { max-width: 68ch; }
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <h1>E-Tracker</h1>
+  <span class="sync" id="sync" data-s="local"><i></i><span id="sync-text">Saved on this device</span></span>
+</div></header>
+<nav class="tabs" aria-label="Sections"><div class="wrap">
+  <a href="#overview" data-tab="overview">Overview</a>
+  <a href="#injections" data-tab="injections">Injections</a>
+  <a href="#bloods" data-tab="bloods">Blood tests</a>
+  <a href="#regimen" data-tab="regimen">Regimen</a>
+</div></nav>
+<main><div class="wrap" id="view"></div></main>
+<footer><div class="wrap"><p>Estimates come from the open-source <a href="https://github.com/WHSAH/estrannaise.js" target="_blank" rel="noopener">estrannaise.js</a> model (MIT licence, © alix). It describes a typical response and people vary a lot, so treat the curve as a rough guide and your blood tests as the truth. This is a personal log, not medical advice.</p></div></footer>
+<dialog id="dlg" aria-labelledby="dlg-title"></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+/* Model parameters and posterior samples below are from estrannaise.js
+   (https://github.com/WHSAH/estrannaise.js), MIT License, Copyright (c) 2025 alix.
+   See THIRD_PARTY_LICENSES.md. Each row is [d, k1, k2, k3] for a 3-compartment model. */
+const PK = {
+  "EV im": [478.0, 0.236, 4.85, 1.24],
+  "EEn im": [191.4, 0.119, 0.601, 0.402],
+  "EC im": [246.0, 0.0825, 3.57, 0.669],
+  "EUn im": [471.5, 0.01729, 6.528, 2.285],
+  "EUn casubq": [16.15, 0.046, 0.022, 0.101]
+};
+const SAMPLES = {
+  "EV im": [[881.2,0.177,2.58,1.91],[575.4,0.234,3.22,1.56],[521.8,0.233,4.88,1.39],[670.4,0.228,3.06,1.65],[466.2,0.228,9.95,1.17],[451.4,0.23,42.12,1.18],[398.4,0.272,5.91,1.11],[575.4,0.232,5.34,1.39],[341.7,0.269,4.73,0.98],[830.0,0.188,2.65,1.95],[750.1,0.218,2.67,1.81],[440.6,0.244,9.07,1.2],[385.1,0.261,10.51,1.01],[542.0,0.211,4.41,1.38],[690.9,0.222,3.32,1.75],[428.9,0.23,21.47,1.09],[517.9,0.247,3.55,1.39],[401.5,0.258,7.13,1.07],[679.0,0.233,2.79,1.76],[965.3,0.2,2.51,2.31],[366.4,0.248,15.67,1.0],[362.3,0.271,8.58,0.97],[628.0,0.189,5.19,1.49],[326.7,0.262,48.29,0.87],[455.9,0.227,8.84,1.07],[427.7,0.223,4.74,1.13],[349.2,0.264,11.5,0.96],[462.4,0.233,6.57,1.18],[505.3,0.233,5.4,1.28],[423.6,0.228,8.71,1.09],[476.6,0.231,6.76,1.23],[654.3,0.217,2.68,1.61],[490.6,0.221,12.38,1.18],[622.3,0.227,2.83,1.56],[451.9,0.251,8.91,1.25],[441.2,0.249,5.29,1.18],[478.3,0.187,26.66,1.16],[341.5,0.253,9.07,0.9],[599.9,0.233,4.29,1.52],[648.2,0.206,3.14,1.57],[371.4,0.258,15.05,1.0],[352.0,0.275,7.87,0.94],[521.2,0.225,4.62,1.33],[387.4,0.263,9.38,1.05],[746.9,0.215,2.46,1.91],[667.4,0.201,4.36,1.78],[500.4,0.237,4.18,1.35],[833.2,0.184,5.34,1.87]],
+  "EC im": [[632.3,0.0808,6.29,1.712],[512.5,0.0795,1.55,1.383],[302.0,0.0833,12.27,0.821],[276.4,0.0729,18.92,0.724],[289.0,0.0781,2.78,0.749],[526.5,0.0683,2.21,1.251],[397.4,0.0789,2.6,1.063],[276.4,0.0754,21.99,0.718],[313.1,0.0779,7.89,0.84],[298.5,0.0761,2.44,0.8],[158.8,0.0978,4.28,0.432],[333.8,0.0816,4.29,0.886],[551.0,0.0645,3.4,1.391],[363.3,0.0818,3.14,0.898],[331.9,0.0798,2.63,0.889],[226.8,0.084,3.15,0.639],[320.1,0.0748,6.3,0.749],[591.8,0.0656,2.25,1.445],[365.8,0.08,4.13,0.943],[328.1,0.0782,14.32,0.822],[891.1,0.0726,3.45,2.133],[317.1,0.0683,3.12,0.785],[244.4,0.0865,5.65,0.693],[246.4,0.0744,3.04,0.751],[308.4,0.0753,3.64,0.82],[506.3,0.0691,2.08,1.242],[212.0,0.0784,1.51,0.605],[299.6,0.0814,1.34,0.913],[426.7,0.0825,3.07,1.098],[501.0,0.0674,15.19,1.294],[256.9,0.0873,3.88,0.697],[426.6,0.0804,2.02,1.161],[211.2,0.0893,9.37,0.597],[719.5,0.0763,5.76,1.87],[208.3,0.0932,1.01,0.636],[619.3,0.063,8.01,1.507],[409.5,0.0782,1.93,1.146],[251.8,0.0779,5.26,0.635],[644.3,0.0667,11.88,1.663],[431.8,0.0746,8.04,1.189],[395.4,0.0788,1.66,1.04],[415.1,0.0836,4.03,1.091],[254.2,0.084,2.39,0.631],[377.7,0.0862,4.06,0.968],[347.4,0.0733,1.47,1.041],[423.4,0.0787,1.61,1.124],[461.5,0.0671,5.8,1.118],[249.8,0.0823,10.93,0.688]],
+  "EEn im": [[107.7,0.163,0.779,0.249],[101.6,0.152,1.862,0.212],[159.5,0.13,0.845,0.358],[124.8,0.134,1.125,0.243],[106.3,0.145,1.935,0.216],[206.7,0.115,0.639,0.418],[140.7,0.133,0.847,0.294],[97.1,0.145,1.768,0.176],[105.2,0.148,1.666,0.218],[163.5,0.157,0.563,0.407],[91.3,0.154,10.47,0.181],[142.5,0.123,1.079,0.287],[186.9,0.139,0.551,0.439],[111.1,0.158,2.101,0.247],[262.8,0.106,0.601,0.537],[96.8,0.147,2.976,0.197],[88.2,0.154,5.401,0.174],[100.0,0.147,1.508,0.202],[230.9,0.113,0.548,0.455],[101.8,0.149,5.287,0.204],[140.4,0.126,1.064,0.28],[120.0,0.143,0.976,0.26],[100.8,0.17,1.065,0.235],[133.3,0.13,0.838,0.278],[109.3,0.138,2.572,0.214],[2338.7,0.664,76.9,5.17],[1704.7,0.708,72.8,4.24],[2365.5,0.612,52.5,5.02],[1377.2,0.832,81.0,3.42],[2294.5,0.659,55.0,5.1],[3307.0,0.668,99.9,7.79],[1878.9,0.707,78.1,4.11],[1727.9,0.687,90.7,3.99],[2749.3,0.603,19.8,5.66],[2001.3,0.702,88.6,4.75],[2928.3,0.614,69.4,5.83],[1522.0,0.672,23.3,3.48],[1386.8,0.7,62.8,3.15],[1831.7,0.623,30.1,3.88],[2243.3,0.609,32.3,4.58],[2207.3,0.583,33.6,4.47],[2251.3,0.621,33.2,4.68],[2284.5,0.613,30.5,4.87],[2104.4,0.687,22.9,4.77],[1532.3,0.772,80.0,3.62],[2112.5,0.733,51.6,5.06],[989.9,0.829,41.6,2.68],[2123.9,0.613,107.9,4.34]],
+  "EUn im": [[213.28,0.03122,7.942,1.565],[210.69,0.02583,15.3,1.452],[161.44,0.0347,5.315,1.293],[849.1,0.01159,15.434,2.916],[1361.01,0.00696,6.105,2.771],[546.77,0.02596,14.07,3.637],[4061.69,0.00186,7.833,2.273],[120.16,0.04265,19.133,1.217],[441.28,0.02962,10.936,3.51],[208.7,0.02555,17.051,1.368],[224.71,0.04028,25.292,2.088],[202.12,0.03565,4.84,1.621],[995.06,0.00524,8.256,1.508],[191.93,0.0314,3.438,1.57],[226.95,0.02796,20.775,1.697],[458.41,0.01144,4.408,1.278],[765.96,0.01502,10.226,3.713],[599.26,0.01757,17.738,2.524],[700.35,0.02739,11.971,4.354],[140.83,0.03365,12.017,1.161],[254.96,0.03306,8.868,1.991],[900.72,0.00998,16.62,2.557],[755.73,0.01109,6.707,2.417],[417.95,0.00901,22.95,1.035],[361.05,0.02737,2.838,2.785],[164.82,0.02527,29.811,1.025],[1126.09,0.01178,18.859,4.002],[313.9,0.01503,18.553,1.395],[647.04,0.0074,76.477,1.538],[322.13,0.02129,12.352,1.846],[647.27,0.01126,20.552,2.237],[116.12,0.04888,17.808,1.3],[589.18,0.01212,6.234,2.321],[41.19,0.06215,11.858,0.515],[202.88,0.02707,9.081,1.462],[317.13,0.0145,8.612,1.296],[60.37,0.03682,9.153,0.45],[593.78,0.0117,23.549,1.874],[703.85,0.01378,8.666,2.709],[136.36,0.03377,6.771,1.195],[1790.68,0.01036,6.973,5.386],[467.05,0.01322,58.104,1.958],[1597.63,0.00366,2.256,1.476],[319.43,0.02301,18.207,1.93],[307.94,0.01762,6.506,1.652],[286.36,0.02474,4.436,1.757],[134.17,0.05625,3.129,1.781],[895.67,0.01953,17.841,4.522]],
+  "EUn casubq": [[14.988,0.061,0.031,0.112],[13.162,0.038,0.028,0.085],[16.095,0.031,0.033,0.102],[14.110,0.046,0.031,0.097],[18.467,0.022,0.022,0.094],[13.560,0.872,0.022,0.103],[13.413,3.583,0.016,0.098],[30.224,3.837,0.005,0.098],[12.940,0.059,0.025,0.092],[11.132,1.153,0.037,0.086],[15.859,0.095,0.013,0.092],[19.799,0.783,0.010,0.105],[27.721,0.326,0.005,0.094],[11.935,0.352,0.021,0.090],[13.753,2.850,0.029,0.103],[20.214,2.071,0.008,0.104],[19.215,0.024,0.023,0.100],[14.362,0.946,0.015,0.096],[19.216,0.299,0.009,0.093],[16.435,0.039,0.025,0.100],[19.237,0.020,0.023,0.097],[25.376,4.484,0.007,0.104],[22.007,0.022,0.020,0.113],[22.318,0.016,0.027,0.106],[28.256,2.037,0.006,0.108],[12.853,5.731,0.023,0.103],[17.429,0.029,0.023,0.101],[10.891,5.544,0.027,0.092],[11.824,0.829,0.028,0.105],[14.594,2.036,0.011,0.090],[16.612,0.061,0.016,0.098],[13.891,0.031,0.035,0.103],[12.908,0.050,0.038,0.098],[22.650,3.121,0.008,0.106],[23.707,4.806,0.006,0.114],[12.644,2.667,0.026,0.111],[13.814,0.044,0.028,0.098],[24.510,0.659,0.007,0.103],[27.195,3.016,0.005,0.099],[20.087,0.172,0.010,0.101],[15.927,0.034,0.021,0.091],[17.618,0.026,0.032,0.106],[28.722,4.700,0.005,0.095],[18.241,0.031,0.034,0.119],[14.427,5.209,0.012,0.085],[15.934,0.042,0.025,0.103],[10.683,4.506,0.034,0.096],[16.411,1.387,0.012,0.095]]
+};
+const ESTERS = {
+  "EV im": { name: "Estradiol valerate", short: "EV" },
+  "EEn im": { name: "Estradiol enanthate", short: "EEn" },
+  "EC im": { name: "Estradiol cypionate", short: "EC" },
+  "EUn im": { name: "Estradiol undecylate", short: "EUn" },
+  "EUn casubq": { name: "Estradiol undecylate in castor oil (subcutaneous)", short: "EUn subQ" }
+};
+const SITE_PRESETS = ["Left thigh", "Right thigh", "Left glute", "Right glute", "Left belly", "Right belly", "Left arm", "Right arm"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAY = 864e5, PMOL = 3.6713, NMOL = 0.03467;
+const LS_KEY = "e-tracker:v1";
+
+/* ---------- state ---------- */
+function defaults() {
+  return {
+    v: 1, updatedAt: 0, setupDone: false,
+    settings: { ester: "EV im", dose: null, conc: null, weekday: 2, time: "09:00", steady: true,
+      e2Unit: "pg/mL", tUnit: "ng/dL", targetLo: null, targetHi: null,
+      sites: ["Left thigh", "Right thigh"], range: "4w", calibrate: false },
+    injections: [], tests: []
+  };
+}
+function normalize(s) {
+  const d = defaults();
+  if (!s || typeof s !== "object") return d;
+  const out = { ...d, ...s, settings: { ...d.settings, ...(s.settings || {}) } };
+  out.injections = Array.isArray(s.injections) ? s.injections.filter(i => i && i.at) : [];
+  out.tests = Array.isArray(s.tests) ? s.tests.filter(t => t && t.at) : [];
+  if (!Array.isArray(out.settings.sites)) out.settings.sites = d.settings.sites;
+  if (!PK[out.settings.ester]) out.settings.ester = d.settings.ester;
+  return out;
+}
+let state = defaults();
+try { state = normalize(JSON.parse(localStorage.getItem(LS_KEY))); } catch (e) {}
+let tab = "overview";
+
+function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
+function commit(rerender = true) {
+  state.updatedAt = Date.now();
+  saveLocal(); queueCloud();
+  if (rerender) render();
+}
+
+/* ---------- optional account sync (only when opened as a Claude artifact) ---------- */
+let cloudRef = null, cloudBusy = false, cloudDirty = false, cloudTimer = 0;
+function setSync(s) {
+  const text = { local: "Saved on this device", syncing: "Connecting…", synced: "Saved to your Claude account",
+    stale: "Can't reach your account yet. Saved on this device", error: "Account sync is off. Saved on this device" }[s];
+  $("#sync").dataset.s = s; $("#sync-text").textContent = text;
+}
+async function initCloud() {
+  try {
+    if (!window.claude || !window.claude.use) return;
+    const [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+    if (!db || !user) return;
+    const id = await user.id();
+    if (!id) return;
+    cloudRef = db.collection("data/users/" + id).doc("tracker");
+    setSync("syncing");
+    const timer = setTimeout(() => { if ($("#sync").dataset.s === "syncing") setSync("stale"); }, 10000);
+    cloudRef.onSnapshot(snap => {
+      if (snap.metadata && snap.metadata.hasPendingWrites) return;
+      const live = !(snap.metadata && snap.metadata.fromCache);
+      const remote = snap.exists ? snap.data() : null;
+      if (remote && typeof remote.state === "string" && remote.updatedAt > state.updatedAt) {
+        try { state = normalize(JSON.parse(remote.state)); saveLocal(); render(); } catch (e) {}
+      } else if (live && state.updatedAt > 0 && (!remote || remote.updatedAt < state.updatedAt)) {
+        queueCloud();
+      }
+      if (live) { clearTimeout(timer); setSync("synced"); }
+    }, () => { clearTimeout(timer); cloudRef = null; setSync("error"); });
+  } catch (e) {}
+}
+function queueCloud() {
+  if (!cloudRef) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(pushCloud, 500);
+}
+async function pushCloud() {
+  if (!cloudRef) return;
+  if (cloudBusy) { cloudDirty = true; return; }
+  cloudBusy = true;
+  try { await cloudRef.set({ updatedAt: state.updatedAt, state: JSON.stringify(state) }); setSync("synced"); }
+  catch (e) { setSync("error"); }
+  cloudBusy = false;
+  if (cloudDirty) { cloudDirty = false; pushCloud(); }
+}
+
+/* ---------- helpers ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = n => String(n).padStart(2, "0");
+const toInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const ts = at => new Date(at).getTime();
+const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d; };
+const dayDiff = (a, b) => Math.round((startOfDay(a) - startOfDay(b)) / DAY);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const parseNum = v => { v = String(v == null ? "" : v).trim().replace(",", "."); if (v === "") return null; const n = Number(v); return isFinite(n) ? n : NaN; };
+const fDate = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" });
+const fDateY = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+const fTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const fTick = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
+const fMonth = new Intl.DateTimeFormat(undefined, { month: "short" });
+const fmtDay = t => (new Date(t).getFullYear() === new Date().getFullYear() ? fDate : fDateY).format(t);
+function relDays(n) { return n === 0 ? "Today" : n === 1 ? "Tomorrow" : n === -1 ? "Yesterday" : n > 0 ? `In ${n} days` : `${-n} days ago`; }
+function fmtNum(v) { if (v == null || !isFinite(v)) return "–"; const a = Math.abs(v); return a >= 20 ? String(Math.round(v)) : a >= 2 ? String(Math.round(v * 10) / 10) : String(Math.round(v * 100) / 100); }
+const e2Conv = () => state.settings.e2Unit === "pmol/L" ? PMOL : 1;
+const fmtE2 = pg => fmtNum(pg * e2Conv());
+const testE2pg = t => t.e2 == null ? null : (t.e2Unit === "pmol/L" ? t.e2 / PMOL : t.e2);
+const testTdisp = t => { if (t.t == null) return null; const ng = t.tUnit === "nmol/L" ? t.t / NMOL : t.t; return state.settings.tUnit === "nmol/L" ? ng * NMOL : ng; };
+const sortedInj = () => state.injections.slice().sort((a, b) => ts(a.at) - ts(b.at));
+const sortedTests = () => state.tests.slice().sort((a, b) => ts(a.at) - ts(b.at));
+let toastTimer = 0;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600); }
+
+/* ---------- schedule and site rotation ---------- */
+function schedule(now = Date.now()) {
+  const s = state.settings, today = startOfDay(now);
+  const slot = new Date(today);
+  slot.setDate(slot.getDate() - ((today.getDay() - s.weekday + 7) % 7));
+  const since = dayDiff(today, slot);
+  const due = new Date(slot);
+  const skipFirst = since > 3 || (!state.injections.length && since > 0);
+  for (let k = 0; k < 3; k++) {
+    const from = new Date(due); from.setDate(from.getDate() - 3);
+    const covered = state.injections.some(i => ts(i.at) >= from.getTime());
+    if (!(covered || (k === 0 && skipFirst))) break;
+    due.setDate(due.getDate() + 7);
+  }
+  const [h, m] = String(s.time || "09:00").split(":").map(Number);
+  const dueAt = new Date(due); dueAt.setHours(h || 0, m || 0, 0, 0);
+  return { due, dueAt, delta: dayDiff(due, today) };
+}
+function siteStats() {
+  const last = {}, count = {};
+  for (const i of state.injections) if (i.site) { last[i.site] = Math.max(last[i.site] || 0, ts(i.at)); count[i.site] = (count[i.site] || 0) + 1; }
+  return { last, count };
+}
+function suggestSite() {
+  const sites = state.settings.sites;
+  if (!sites.length) return "";
+  const { last } = siteStats();
+  return sites.map((s, i) => [s, last[s] || 0, i]).sort((a, b) => a[1] - b[1] || a[2] - b[2])[0][0];
+}
+
+/* ---------- pharmacokinetic model ---------- */
+function curve(t, dose, p) {
+  const d = p[0], k1 = p[1], k2 = p[2], k3 = p[3];
+  const v = dose * d * k1 * k2 * (Math.exp(-k1 * t) / (k1 - k2) / (k1 - k3) - Math.exp(-k2 * t) / (k1 - k2) / (k2 - k3) + Math.exp(-k3 * t) / (k1 - k3) / (k2 - k3));
+  return isFinite(v) && v > 0 ? v : 0;
+}
+const NS = 48;
+function doseEvents(until) {
+  const s = state.settings, now = Date.now(), sch = schedule(now);
+  const logged = sortedInj().map(i => ({ t: ts(i.at), dose: Number(i.dose), ester: i.ester, kind: "logged" })).filter(e => e.dose > 0 && PK[e.ester] && isFinite(e.t));
+  const ev = logged.slice();
+  const hasPlan = s.dose > 0 && PK[s.ester];
+  const firstPlanned = hasPlan ? Math.max(sch.dueAt.getTime(), now) : null;
+  if (s.steady) {
+    const anchor = logged[0] || (hasPlan ? { t: firstPlanned, dose: Number(s.dose), ester: s.ester } : null);
+    if (anchor) for (let k = 1; k <= 30; k++) {
+      const d = new Date(anchor.t); d.setDate(d.getDate() - 7 * k);
+      ev.push({ t: d.getTime(), dose: anchor.dose, ester: anchor.ester, kind: "assumed" });
+    }
+  }
+  if (hasPlan) {
+    const d = new Date(sch.dueAt);
+    for (let k = 0; k < 60; k++) {
+      const t = k === 0 ? firstPlanned : d.getTime();
+      if (t > until) break;
+      ev.push({ t, dose: Number(s.dose), ester: s.ester, kind: "planned" });
+      d.setDate(d.getDate() + 7);
+    }
+  }
+  return ev.sort((a, b) => a.t - b.t);
+}
+const acc = new Float64Array(NS);
+function estimate(t, events) {
+  let mid = 0; acc.fill(0);
+  for (const ev of events) {
+    const dt = (t - ev.t) / DAY;
+    if (dt <= 0) break;
+    if (dt > 240 && ev.ester.indexOf("EUn") !== 0) continue;
+    mid += curve(dt, ev.dose, PK[ev.ester]);
+    const S = SAMPLES[ev.ester];
+    for (let j = 0; j < NS; j++) acc[j] += curve(dt, ev.dose, S[j]);
+  }
+  const sorted = Array.from(acc).sort((a, b) => a - b);
+  const q = p => { const x = p * (NS - 1), i = Math.floor(x), f = x - i; return sorted[i] + (sorted[Math.min(NS - 1, i + 1)] - sorted[i]) * f; };
+  return { mid, lo: Math.min(q(0.05), mid), hi: Math.max(q(0.95), mid) };
+}
+function buildModel() {
+  const now = Date.now();
+  const events = doseEvents(now + 70 * DAY);
+  const tests = sortedTests().map(t => {
+    const pg = testE2pg(t), at = ts(t.at);
+    const est = events.length && pg != null ? estimate(at, events) : null;
+    let lastInj = null;
+    for (const e of events) { if (e.kind === "planned") continue; if (e.t <= at) lastInj = e; else break; }
+    return { test: t, at, pg, est, sinceInj: lastInj && lastInj.kind === "logged" ? (at - lastInj.t) / DAY : null };
+  });
+  const logs = tests.filter(x => x.est && x.est.mid > 5 && x.pg > 0).map(x => Math.log(x.pg / x.est.mid));
+  const factor = logs.length ? Math.exp(logs.reduce((a, b) => a + b, 0) / logs.length) : null;
+  return { now, events, tests, factor, nFactor: logs.length };
+}
+
+/* ---------- views ---------- */
+let model = null;
+function render() {
+  model = buildModel();
+  document.querySelectorAll(".tabs a").forEach(a => { if (a.dataset.tab === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  const v = $("#view");
+  v.innerHTML = ({ overview: viewOverview, injections: viewInjections, bloods: viewBloods, regimen: viewRegimen }[tab])();
+  if (tab === "overview") drawChart();
+}
+
+function viewOverview() {
+  const s = state.settings, sch = schedule(), now = model.now;
+  const hasModel = model.events.length > 0;
+  const k = s.calibrate && model.factor ? model.factor : 1;
+  let h = `<div class="stack">`;
+  if (!state.setupDone) {
+    h += `<div class="panel"><div class="stack" style="gap:10px"><h2>Start with your regimen</h2>
+      <p class="sub">Add your ester and weekly dose so the tracker can plan your ${WEEKDAYS[s.weekday]}s and draw your estimated levels.</p>
+      <div><button class="primary" data-act="go" data-to="regimen">Set up regimen</button></div></div></div>`;
+  }
+  // next injection
+  const pillCls = sch.delta < 0 ? "late" : sch.delta === 0 ? "now" : "";
+  const pillTxt = sch.delta < 0 ? `Overdue by ${-sch.delta} day${sch.delta === -1 ? "" : "s"}` : relDays(sch.delta);
+  const site = suggestSite();
+  h += `<div class="tiles">
+    <div class="tile"><span class="label">Next injection</span>
+      <span class="value">${esc(fDate.format(sch.due))}</span>
+      <div><span class="pill ${pillCls}">${sch.delta < 0 ? "! " : ""}${pillTxt}</span></div>
+      <span class="sub">${s.dose > 0 ? `${fmtNum(s.dose)} mg ${esc(ESTERS[s.ester].short)}` : "Dose not set"}${site ? ` · suggested site: ${esc(site)}` : ""}</span>
+      <div class="foot"><button class="primary" data-act="new-inj">Log injection</button></div>
+    </div>`;
+  // estimate now
+  if (hasModel) {
+    const e = estimate(now, model.events);
+    const trough = sch.dueAt.getTime() > now ? estimate(sch.dueAt.getTime(), model.events) : null;
+    h += `<div class="tile"><span class="label">Estimated estradiol now</span>
+      <span class="value num">${fmtE2(e.mid * k)} <small>${esc(s.e2Unit)}</small></span>
+      <span class="sub num">Model range ${fmtE2(e.lo * k)}–${fmtE2(e.hi * k)}${k !== 1 ? ", scaled to your results" : ""}</span>
+      ${trough ? `<span class="sub num">Before your next injection: about ${fmtE2(trough.mid * k)}</span>` : ""}
+    </div>`;
+  } else {
+    h += `<div class="tile"><span class="label">Estimated estradiol now</span><span class="value">–</span><span class="sub">Appears once your dose is set or an injection is logged.</span></div>`;
+  }
+  // latest test
+  const lt = model.tests.filter(x => x.pg != null).slice(-1)[0];
+  if (lt) {
+    h += `<div class="tile"><span class="label">Latest blood test</span>
+      <span class="value num">${fmtE2(lt.pg)} <small>${esc(s.e2Unit)}</small></span>
+      <span class="sub">${esc(fmtDay(lt.at))}${lt.sinceInj != null ? ` · ${fmtNum(lt.sinceInj)} days after injection` : ""}</span>
+      ${lt.est ? `<span class="sub num">Model estimated ${fmtE2(lt.est.mid)} (you measured ${fmtNum(lt.pg / lt.est.mid)}× that)</span>` : ""}
+      <div class="foot"><button data-act="new-test">Add blood test</button></div></div>`;
+  } else {
+    h += `<div class="tile"><span class="label">Latest blood test</span><span class="value">–</span>
+      <span class="sub">Add a result to see how it compares with the estimate for that moment.</span>
+      <div class="foot"><button data-act="new-test">Add blood test</button></div></div>`;
+  }
+  h += `</div>`;
+  // chart
+  const ranges = [["4w", "4 weeks"], ["3m", "3 months"], ["1y", "1 year"], ["all", "All"]];
+  h += `<div class="panel"><div class="panel-head"><h2>Estimated vs measured estradiol</h2></div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Time range">${ranges.map(([id, l]) => `<button data-act="range" data-r="${id}" aria-pressed="${s.range === id}">${l}</button>`).join("")}</div>
+      ${model.factor ? `<label class="check" for="calib"><input type="checkbox" id="calib" ${s.calibrate ? "checked" : ""}>Scale estimate to my results (×${fmtNum(model.factor)})</label>` : ""}
+    </div>
+    <div class="legend">
+      <span><i class="k-line"></i>Estimate${k !== 1 ? " (scaled)" : ""}</span>
+      <span><i class="k-band"></i>Model range (5–95%)</span>
+      <span><i class="k-dot"></i>Blood test</span>
+      <span><i class="k-tick"></i>Injection</span>
+      ${s.targetLo != null && s.targetHi != null ? `<span><i class="k-target"></i>Your target</span>` : ""}
+    </div>
+    <div id="chart"></div>
+    ${hasModel ? `<p class="sub" style="margin-top:8px">The dashed part is a projection that assumes you keep injecting every ${WEEKDAYS[s.weekday]}.${s.steady && hasModel ? " Levels before your first logged injection assume you were already on this dose." : ""}</p>` : ""}
+  </div></div>`;
+  return h;
+}
+
+function viewInjections() {
+  const s = state.settings, list = sortedInj().reverse(), { last, count } = siteStats(), next = suggestSite(), now = Date.now();
+  let h = `<div class="stack"><div class="panel"><div class="panel-head"><h2>Site rotation</h2><button class="primary" data-act="new-inj">Log injection</button></div>`;
+  if (s.sites.length) {
+    h += `<div class="sites">${s.sites.map(x => `<div class="site ${x === next ? "next" : ""}"><b>${esc(x)}</b><span>${last[x] ? `${relDays(dayDiff(last[x], now))} · used ${count[x]}×` : "Not used yet"}${x === next ? " · up next" : ""}</span></div>`).join("")}</div>`;
+  } else h += `<p class="empty">Add your injection sites in Regimen to get rotation suggestions.</p>`;
+  h += `</div><div class="panel"><div class="panel-head"><h2>Injection log</h2><span class="sub">${list.length} logged</span></div>`;
+  if (!list.length) h += `<p class="empty">No injections logged yet. Log one on injection day and it appears here.</p>`;
+  else h += `<div class="rows">${list.map(i => {
+    const t = ts(i.at), ml = s.conc > 0 && i.dose > 0 ? ` (${fmtNum(i.dose / s.conc)} mL)` : "";
+    return `<div class="rowi"><div>
+      <div class="when">${esc(fmtDay(t))} <span class="sub">${esc(fTime.format(t))}</span></div>
+      <div class="meta"><span class="num">${fmtNum(Number(i.dose))} mg${ml} ${esc((ESTERS[i.ester] || {}).short || "")}</span>${i.site ? `<span class="pill">${esc(i.site)}</span>` : ""}</div>
+      ${i.notes ? `<div class="note">${esc(i.notes)}</div>` : ""}</div>
+      <button class="quiet" data-act="edit-inj" data-id="${esc(i.id)}">Edit</button></div>`;
+  }).join("")}</div>`;
+  return h + `</div></div>`;
+}
+
+function viewBloods() {
+  const s = state.settings, rows = model.tests.slice().reverse();
+  let h = `<div class="stack"><div class="panel"><div class="panel-head"><h2>Blood tests</h2><button class="primary" data-act="new-test">Add blood test</button></div>`;
+  if (model.factor) h += `<p class="sub" style="margin-bottom:12px">Across ${model.nFactor} result${model.nFactor === 1 ? "" : "s"}, you measure about <strong>${fmtNum(model.factor)}×</strong> what the model estimates. One or two results say little, because timing and lab variation move this a lot.</p>`;
+  if (!rows.length) h += `<p class="empty">No results yet. Add one with the time of the blood draw, since levels change a lot between injections.</p>`;
+  else {
+    h += `<div class="tablewrap"><table><thead><tr><th>Blood draw</th><th>After injection</th><th>Estradiol (${esc(s.e2Unit)})</th><th>Model estimate</th><th>Measured ÷ estimate</th><th>Testosterone (${esc(s.tUnit)})</th><th></th></tr></thead><tbody>`;
+    for (const x of rows) {
+      const t = x.test, tv = testTdisp(t);
+      let cmp = "–";
+      if (x.est && x.pg != null) {
+        const rel = x.pg < x.est.lo ? "below model range" : x.pg > x.est.hi ? "above model range" : "within model range";
+        cmp = `${x.est.mid > 0 ? fmtNum(x.pg / x.est.mid) + "×" : "–"} <span class="sub">${rel}</span>`;
+      }
+      const extra = [t.lh != null ? `LH ${fmtNum(t.lh)} IU/L` : "", t.fsh != null ? `FSH ${fmtNum(t.fsh)} IU/L` : "", t.shbg != null ? `SHBG ${fmtNum(t.shbg)} nmol/L` : "", t.prl != null ? `Prolactin ${fmtNum(t.prl)}` : "", t.lab ? `Lab: ${esc(t.lab)}` : "", t.notes ? esc(t.notes) : ""].filter(Boolean).join(" · ");
+      h += `<tr><td class="wide"><strong>${esc(fmtDay(x.at))}</strong> <span class="sub">${esc(fTime.format(x.at))}</span></td>
+        <td data-l="After injection">${x.sinceInj != null ? fmtNum(x.sinceInj) + " days" : "–"}</td>
+        <td data-l="Estradiol (${esc(s.e2Unit)})"><strong>${x.pg != null ? fmtE2(x.pg) : "–"}</strong></td>
+        <td data-l="Model estimate">${x.est ? `${fmtE2(x.est.mid)} <span class="sub">(${fmtE2(x.est.lo)}–${fmtE2(x.est.hi)})</span>` : "–"}</td>
+        <td data-l="Measured ÷ estimate">${cmp}</td><td data-l="Testosterone (${esc(s.tUnit)})">${tv != null ? fmtNum(tv) : "–"}</td>
+        <td class="edit"><button class="quiet" data-act="edit-test" data-id="${esc(t.id)}">Edit</button></td></tr>`;
+      if (extra) h += `<tr class="extra-row"><td class="extra" colspan="7">${extra}</td></tr>`;
+    }
+    h += `</tbody></table></div>`;
+  }
+  return h + `</div></div>`;
+}
+
+function sitesBlock() {
+  const s = state.settings, all = SITE_PRESETS.concat(s.sites.filter(x => !SITE_PRESETS.includes(x)));
+  return `<div class="chips">${all.map((x, i) => `<label class="chip"><input type="checkbox" id="site-${i}" data-site="${esc(x)}" ${s.sites.includes(x) ? "checked" : ""}><span>${esc(x)}</span></label>`).join("")}</div>`;
+}
+function viewRegimen() {
+  const s = state.settings, conv = e2Conv();
+  const tv = v => v == null ? "" : fmtNum(v * conv);
+  return `<div class="stack">
+  <div class="panel"><div class="panel-head"><h2>Regimen</h2><span class="sub">Changes save as you make them</span></div>
+    <div class="form" id="regimen-form">
+      <div class="grid2">
+        <div class="field"><label for="set-ester">Ester</label><select id="set-ester">${Object.keys(ESTERS).map(k => `<option value="${k}" ${s.ester === k ? "selected" : ""}>${esc(ESTERS[k].name)}</option>`).join("")}</select></div>
+        <div class="field"><label for="set-dose">Dose per injection (mg)</label><input type="text" inputmode="decimal" id="set-dose" value="${s.dose == null ? "" : esc(s.dose)}" placeholder="e.g. 4"></div>
+        <div class="field"><label for="set-conc">Vial strength (mg/mL)</label><input type="text" inputmode="decimal" id="set-conc" value="${s.conc == null ? "" : esc(s.conc)}" placeholder="Optional"><span class="hint">Lets the log show the volume you draw up.</span></div>
+        <div class="field"><label for="set-weekday">Injection day</label><select id="set-weekday">${WEEKDAYS.map((d, i) => `<option value="${i}" ${s.weekday === i ? "selected" : ""}>Every ${d}</option>`).join("")}</select></div>
+        <div class="field"><label for="set-time">Usual time</label><input type="time" id="set-time" value="${esc(s.time)}"></div>
+      </div>
+      <label class="check" for="set-steady"><input type="checkbox" id="set-steady" ${s.steady ? "checked" : ""}>I was already on this dose before my first logged injection</label>
+      <fieldset><legend>Injection sites to rotate through</legend><div id="sites-block">${sitesBlock()}</div>
+        <div class="unitrow"><input type="text" id="site-new" placeholder="Add another site" aria-label="Add another site"><button data-act="add-site">Add</button></div></fieldset>
+    </div>
+  </div>
+  <div class="panel"><div class="panel-head"><h2>Units and target</h2></div>
+    <div class="form"><div class="grid2">
+      <div class="field"><label for="set-e2unit">Estradiol unit</label><select id="set-e2unit"><option ${s.e2Unit === "pg/mL" ? "selected" : ""}>pg/mL</option><option ${s.e2Unit === "pmol/L" ? "selected" : ""}>pmol/L</option></select></div>
+      <div class="field"><label for="set-tunit">Testosterone unit</label><select id="set-tunit"><option ${s.tUnit === "ng/dL" ? "selected" : ""}>ng/dL</option><option ${s.tUnit === "nmol/L" ? "selected" : ""}>nmol/L</option></select></div>
+      <div class="field"><label for="set-tlo">Target range, low (<span id="tu1">${esc(s.e2Unit)}</span>)</label><input type="text" inputmode="decimal" id="set-tlo" value="${tv(s.targetLo)}" placeholder="Optional"></div>
+      <div class="field"><label for="set-thi">Target range, high (<span id="tu2">${esc(s.e2Unit)}</span>)</label><input type="text" inputmode="decimal" id="set-thi" value="${tv(s.targetHi)}" placeholder="Optional"><span class="hint">Use the range you and your prescriber agreed on. It is drawn on the chart.</span></div>
+    </div></div>
+  </div>
+  <div class="panel"><div class="panel-head"><h2>Your data</h2></div>
+    <div class="form">
+      <p class="sub">${state.injections.length} injection${state.injections.length === 1 ? "" : "s"} and ${state.tests.length} blood test${state.tests.length === 1 ? "" : "s"} stored. Keep a backup file now and then, because clearing your browser data removes anything saved only on this device.</p>
+      <div class="actions"><button data-act="export">Save backup file</button><button data-act="copy">Copy backup</button><button data-act="import">Restore from backup</button><span class="grow"></span><button class="danger" data-act="erase">Erase everything</button></div>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </div>
+  </div></div>`;
+}
+
+/* ---------- chart ---------- */
+function niceStep(max, target) { const raw = max / target, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+let chartCtx = null;
+function drawChart() {
+  const box = $("#chart"); if (!box) return;
+  const s = state.settings, now = model.now, conv = e2Conv();
+  const k = (s.calibrate && model.factor ? model.factor : 1) * conv;
+  const W = Math.max(280, Math.floor(box.clientWidth || 600)), H = W < 520 ? 250 : 320;
+  const m = { l: 44, r: 14, t: 24, b: 28 };
+  const firstData = Math.min(now - 21 * DAY, ...state.injections.map(i => ts(i.at)), ...state.tests.map(t => ts(t.at)));
+  const span = { "4w": [now - 21 * DAY, now + 8 * DAY], "3m": [now - 77 * DAY, now + 14 * DAY], "1y": [now - 351 * DAY, now + 14 * DAY], all: [firstData - 3 * DAY, now + 14 * DAY] }[s.range] || [now - 21 * DAY, now + 8 * DAY];
+  const t0 = span[0], t1 = span[1], days = (t1 - t0) / DAY;
+  const events = model.events, hasModel = events.length > 0;
+  const tests = model.tests.filter(x => x.pg != null && x.at >= t0 && x.at <= t1);
+  if (!hasModel && !tests.length) { box.innerHTML = `<p class="empty">Set your dose in Regimen, or log an injection, and your estimated curve is drawn here with your blood tests on top.</p>`; chartCtx = null; return; }
+  const pts = [];
+  if (hasModel) {
+    const n = days > 200 ? 480 : Math.min(360, Math.max(140, Math.round((W - m.l - m.r) / 1.6)));
+    const times = [];
+    for (let i = 0; i <= n; i++) times.push(t0 + (t1 - t0) * i / n);
+    for (const e of events) if (e.t > t0 && e.t < t1) times.push(e.t, e.t + 1);
+    times.push(now);
+    times.sort((a, b) => a - b);
+    for (const t of times) { const e = estimate(t, events); pts.push({ t, mid: e.mid * k, lo: e.lo * k, hi: e.hi * k }); }
+  }
+  let max = 0;
+  for (const p of pts) max = Math.max(max, p.hi);
+  for (const x of tests) max = Math.max(max, x.pg * conv);
+  const hasTarget = s.targetLo != null && s.targetHi != null && s.targetHi > s.targetLo;
+  if (hasTarget) max = Math.max(max, s.targetHi * conv);
+  if (!(max > 0)) max = 100 * conv;
+  const step = niceStep(max * 1.08, 4), yMax = Math.ceil(max * 1.08 / step) * step;
+  const X = t => m.l + (t - t0) / (t1 - t0) * (W - m.l - m.r);
+  const Y = v => H - m.b - v / yMax * (H - m.t - m.b);
+  const r1 = n => Math.round(n * 10) / 10;
+  let g = "";
+  for (let v = 0; v <= yMax + step / 2; v += step) {
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${r1(Y(v))}" y2="${r1(Y(v))}" stroke="var(${v === 0 ? "--axis" : "--line"})" stroke-width="1"/>`;
+    g += `<text x="${m.l - 8}" y="${r1(Y(v) + 4)}" text-anchor="end" font-size="11.5" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${fmtNum(v)}</text>`;
+  }
+  g += `<text x="${m.l - 36}" y="12" font-size="11.5" fill="var(--muted)">${esc(s.e2Unit)}</text>`;
+  // x ticks
+  const ticks = [];
+  if (days <= 200) {
+    const d = startOfDay(t0); d.setDate(d.getDate() + ((s.weekday - d.getDay() + 7) % 7));
+    for (; d.getTime() <= t1; d.setDate(d.getDate() + 7)) if (d.getTime() >= t0) ticks.push([d.getTime(), fTick.format(d)]);
+  } else {
+    const d = new Date(t0); d.setDate(1); d.setHours(0, 0, 0, 0); d.setMonth(d.getMonth() + 1);
+    for (; d.getTime() <= t1; d.setMonth(d.getMonth() + 1)) ticks.push([d.getTime(), d.getMonth() === 0 ? String(d.getFullYear()) : fMonth.format(d)]);
+  }
+  const minGap = days <= 200 ? 56 : 40, gapPx = ticks.length > 1 ? X(ticks[1][0]) - X(ticks[0][0]) : minGap, stride = Math.max(1, Math.ceil(minGap / gapPx));
+  ticks.forEach(([t, l], i) => {
+    if ((ticks.length - 1 - i) % stride) return;
+    const x = r1(X(t));
+    const anchor = x > W - m.r - 22 ? "end" : x < m.l + 22 ? "start" : "middle";
+    g += `<line x1="${x}" x2="${x}" y1="${H - m.b}" y2="${H - m.b + 4}" stroke="var(--axis)" stroke-width="1"/><text x="${x}" y="${H - 8}" text-anchor="${anchor}" font-size="11.5" fill="var(--muted)">${esc(l)}</text>`;
+  });
+  if (hasTarget) {
+    const ya = Y(s.targetHi * conv), yb = Y(s.targetLo * conv);
+    g += `<rect x="${m.l}" y="${r1(ya)}" width="${W - m.l - m.r}" height="${r1(yb - ya)}" fill="var(--ink-2)" opacity="0.1"/>`;
+  }
+  if (pts.length) {
+    const up = pts.map((p, i) => `${i ? "L" : "M"}${r1(X(p.t))},${r1(Y(p.hi))}`).join("");
+    const dn = pts.slice().reverse().map(p => `L${r1(X(p.t))},${r1(Y(p.lo))}`).join("");
+    g += `<path d="${up}${dn}Z" fill="var(--accent)" opacity="0.13" stroke="none"/>`;
+    const seg = arr => arr.map((p, i) => `${i ? "L" : "M"}${r1(X(p.t))},${r1(Y(p.mid))}`).join("");
+    const past = pts.filter(p => p.t <= now), fut = pts.filter(p => p.t >= now);
+    if (past.length > 1) g += `<path d="${seg(past)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (fut.length > 1) g += `<path d="${seg(fut)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-dasharray="1 5" stroke-linecap="round"/>`;
+  }
+  for (const e of events) {
+    if (e.t < t0 || e.t > t1 || e.kind === "assumed") continue;
+    const x = r1(X(e.t));
+    g += `<rect x="${x - 1.5}" y="${H - m.b - 9}" width="3" height="9" rx="1.5" fill="var(${e.kind === "logged" ? "--ink-2" : "--axis"})"/>`;
+  }
+  if (now >= t0 && now <= t1) {
+    const x = r1(X(now));
+    g += `<line x1="${x}" x2="${x}" y1="${m.t - 6}" y2="${H - m.b}" stroke="var(--axis)" stroke-width="1"/><text x="${x - 5}" y="${m.t - 10}" text-anchor="end" font-size="11.5" fill="var(--muted)">Now</text>`;
+  }
+  tests.forEach((x, i) => {
+    const cx = r1(X(x.at)), cy = r1(Y(x.pg * conv));
+    g += `<circle cx="${cx}" cy="${cy}" r="5.5" fill="var(--measured)" stroke="var(--surface)" stroke-width="2"/>`;
+    if (i === tests.length - 1) {
+      const right = cx < W - m.r - 46;
+      g += `<text x="${right ? cx + 10 : cx - 10}" y="${cy + 4}" text-anchor="${right ? "start" : "end"}" font-size="12.5" font-weight="700" fill="var(--ink)" stroke="var(--surface)" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">${fmtNum(x.pg * conv)}</text>`;
+    }
+  });
+  g += `<g id="hover" visibility="hidden"><line id="hx" y1="${m.t - 6}" y2="${H - m.b}" stroke="var(--ink-2)" stroke-width="1"/><circle id="hd" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/></g>`;
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Estimated estradiol over time with measured blood tests. The Blood tests tab has the same numbers as a table.">${g}</svg><div class="tip" id="tip" hidden></div>`;
+  chartCtx = { W, H, m, t0, t1, X, Y, pts, tests, conv, k };
+}
+function chartHover(ev) {
+  const c = chartCtx, box = $("#chart"); if (!c || !box) return;
+  const svg = $("svg", box), rect = svg.getBoundingClientRect();
+  const px = (ev.clientX - rect.left) * (c.W / rect.width);
+  if (px < c.m.l - 6 || px > c.W - c.m.r + 6) return chartLeave();
+  let snap = null, best = 16;
+  for (const x of c.tests) { const d = Math.abs(c.X(x.at) - px); if (d < best) { best = d; snap = x; } }
+  const t = snap ? snap.at : c.t0 + (px - c.m.l) / (c.W - c.m.l - c.m.r) * (c.t1 - c.t0);
+  let p = null;
+  if (c.pts.length) { let bd = Infinity; for (const q of c.pts) { const d = Math.abs(q.t - t); if (d < bd) { bd = d; p = q; } } }
+  const tt = snap ? snap.at : p ? p.t : t, x = c.X(tt);
+  $("#hover", box).setAttribute("visibility", "visible");
+  $("#hx", box).setAttribute("x1", x); $("#hx", box).setAttribute("x2", x);
+  const hd = $("#hd", box);
+  if (p) { hd.setAttribute("cx", x); hd.setAttribute("cy", c.Y(snap && snap.est ? snap.est.mid * c.k : p.mid)); hd.setAttribute("visibility", "inherit"); } else hd.setAttribute("visibility", "hidden");
+  const unit = state.settings.e2Unit;
+  const est = snap && snap.est ? { mid: snap.est.mid * c.k, lo: snap.est.lo * c.k, hi: snap.est.hi * c.k } : p;
+  let h = `<div class="d">${esc(fmtDay(tt))}, ${esc(fTime.format(tt))}${tt > Date.now() ? " · projected" : ""}</div>`;
+  if (snap) h += `<div class="r"><i class="k-dot"></i><b>${fmtNum(snap.pg * c.conv)} ${esc(unit)}</b><span>measured</span></div>`;
+  if (est) h += `<div class="r"><i class="k-line"></i><b>${fmtNum(est.mid)} ${esc(unit)}</b><span>estimate</span></div><div class="r"><i class="k-band"></i><b>${fmtNum(est.lo)}–${fmtNum(est.hi)}</b><span>model range</span></div>`;
+  const tip = $("#tip", box); tip.innerHTML = h; tip.hidden = false;
+  const sx = x * (rect.width / c.W), tw = tip.offsetWidth;
+  tip.style.left = Math.max(0, Math.min(rect.width - tw, sx + 14 + tw > rect.width ? sx - tw - 14 : sx + 14)) + "px";
+}
+function chartLeave() { const box = $("#chart"); if (!box || !chartCtx) return; const h = $("#hover", box), t = $("#tip", box); if (h) h.setAttribute("visibility", "hidden"); if (t) t.hidden = true; }
+
+/* ---------- dialogs ---------- */
+const dlg = $("#dlg");
+function openInjection(id) {
+  const s = state.settings, cur = id ? state.injections.find(i => i.id === id) : null;
+  const v = cur || { at: toInput(new Date()), dose: s.dose, ester: s.ester, site: suggestSite(), notes: "" };
+  const sites = s.sites.concat(v.site && !s.sites.includes(v.site) ? [v.site] : []);
+  dlg.innerHTML = `<form class="form" id="inj-form" novalidate>
+    <h2 id="dlg-title">${cur ? "Edit injection" : "Log injection"}</h2>
+    <div class="field"><label for="inj-at">Date and time</label><input type="datetime-local" id="inj-at" value="${esc(v.at)}"></div>
+    <div class="grid2">
+      <div class="field"><label for="inj-dose">Dose (mg)</label><input type="text" inputmode="decimal" id="inj-dose" value="${v.dose == null ? "" : esc(v.dose)}"></div>
+      <div class="field"><label for="inj-ester">Ester</label><select id="inj-ester">${Object.keys(ESTERS).map(k => `<option value="${k}" ${v.ester === k ? "selected" : ""}>${esc(ESTERS[k].name)}</option>`).join("")}</select></div>
+    </div>
+    ${sites.length ? `<fieldset><legend>Site</legend><div class="chips">${sites.map((x, i) => `<label class="chip"><input type="radio" name="inj-site" id="inj-site-${i}" value="${esc(x)}" ${v.site === x ? "checked" : ""}><span>${esc(x)}</span></label>`).join("")}</div></fieldset>` : ""}
+    <div class="field"><label for="inj-notes">Notes</label><textarea id="inj-notes" rows="2" placeholder="Optional. Soreness, needle used, anything worth remembering.">${esc(v.notes || "")}</textarea></div>
+    <p class="err" id="form-err" hidden></p>
+    <div class="actions">${cur ? `<button type="button" class="danger" data-act="del-inj" data-id="${esc(cur.id)}">Delete</button>` : ""}<span class="grow"></span><button type="button" data-act="close">Cancel</button><button type="submit" class="primary">Save</button></div>
+  </form>`;
+  dlg.dataset.edit = cur ? cur.id : "";
+  dlg.showModal();
+}
+function openTest(id) {
+  const s = state.settings, cur = id ? state.tests.find(t => t.id === id) : null;
+  const d = new Date(); d.setHours(9, 0, 0, 0);
+  const v = cur || { at: toInput(d), e2: null, e2Unit: s.e2Unit, t: null, tUnit: s.tUnit };
+  const val = x => x == null ? "" : esc(x);
+  const opt = (list, sel) => list.map(u => `<option ${u === sel ? "selected" : ""}>${u}</option>`).join("");
+  dlg.innerHTML = `<form class="form" id="test-form" novalidate>
+    <h2 id="dlg-title">${cur ? "Edit blood test" : "Add blood test"}</h2>
+    <div class="field"><label for="test-at">When the blood was drawn</label><input type="datetime-local" id="test-at" value="${esc(v.at)}"><span class="hint">The time matters. It decides which point of the curve this result is compared with.</span></div>
+    <div class="grid2">
+      <div class="field"><label for="test-e2">Estradiol</label><div class="unitrow"><input type="text" inputmode="decimal" id="test-e2" value="${val(v.e2)}"><select id="test-e2unit" aria-label="Estradiol unit">${opt(["pg/mL", "pmol/L"], v.e2Unit || s.e2Unit)}</select></div></div>
+      <div class="field"><label for="test-t">Testosterone</label><div class="unitrow"><input type="text" inputmode="decimal" id="test-t" value="${val(v.t)}"><select id="test-tunit" aria-label="Testosterone unit">${opt(["ng/dL", "nmol/L"], v.tUnit || s.tUnit)}</select></div></div>
+      <div class="field"><label for="test-lh">LH (IU/L)</label><input type="text" inputmode="decimal" id="test-lh" value="${val(v.lh)}"></div>
+      <div class="field"><label for="test-fsh">FSH (IU/L)</label><input type="text" inputmode="decimal" id="test-fsh" value="${val(v.fsh)}"></div>
+      <div class="field"><label for="test-shbg">SHBG (nmol/L)</label><input type="text" inputmode="decimal" id="test-shbg" value="${val(v.shbg)}"></div>
+      <div class="field"><label for="test-prl">Prolactin</label><input type="text" inputmode="decimal" id="test-prl" value="${val(v.prl)}"></div>
+    </div>
+    <div class="field"><label for="test-lab">Lab or clinic</label><input type="text" id="test-lab" value="${val(v.lab)}"></div>
+    <div class="field"><label for="test-notes">Notes</label><textarea id="test-notes" rows="2">${esc(v.notes || "")}</textarea></div>
+    <p class="err" id="form-err" hidden></p>
+    <div class="actions">${cur ? `<button type="button" class="danger" data-act="del-test" data-id="${esc(cur.id)}">Delete</button>` : ""}<span class="grow"></span><button type="button" data-act="close">Cancel</button><button type="submit" class="primary">Save</button></div>
+  </form>`;
+  dlg.dataset.edit = cur ? cur.id : "";
+  dlg.showModal();
+}
+function formError(msg) { const e = $("#form-err", dlg); e.textContent = msg; e.hidden = false; }
+dlg.addEventListener("submit", ev => {
+  ev.preventDefault();
+  const id = dlg.dataset.edit;
+  if (ev.target.id === "inj-form") {
+    const at = $("#inj-at").value, dose = parseNum($("#inj-dose").value);
+    if (!at || isNaN(ts(at))) return formError("Enter the date and time of the injection.");
+    if (!(dose > 0)) return formError("Enter the dose in mg, for example 4.");
+    const site = (dlg.querySelector('input[name="inj-site"]:checked') || {}).value || "";
+    const rec = { id: id || uid(), at, dose, ester: $("#inj-ester").value, site, notes: $("#inj-notes").value.trim() };
+    if (id) state.injections = state.injections.map(i => i.id === id ? rec : i); else state.injections.push(rec);
+    dlg.close(); commit(); toast(id ? "Injection updated" : "Injection logged");
+  } else if (ev.target.id === "test-form") {
+    const at = $("#test-at").value;
+    if (!at || isNaN(ts(at))) return formError("Enter when the blood was drawn.");
+    const rec = { id: id || uid(), at, e2Unit: $("#test-e2unit").value, tUnit: $("#test-tunit").value, lab: $("#test-lab").value.trim(), notes: $("#test-notes").value.trim() };
+    for (const f of ["e2", "t", "lh", "fsh", "shbg", "prl"]) {
+      const n = parseNum($("#test-" + f).value);
+      if (n !== null && !(n >= 0)) return formError("Results need to be plain numbers, for example 180.");
+      rec[f] = n;
+    }
+    if (["e2", "t", "lh", "fsh", "shbg", "prl"].every(f => rec[f] === null)) return formError("Enter at least one result.");
+    if (id) state.tests = state.tests.map(t => t.id === id ? rec : t); else state.tests.push(rec);
+    dlg.close(); commit(); toast(id ? "Blood test updated" : "Blood test added");
+  }
+});
+
+/* ---------- backup ---------- */
+const backupName = () => `e-tracker-backup-${toInput(new Date()).slice(0, 10)}.json`;
+async function exportData() {
+  const text = JSON.stringify(state, null, 2);
+  if (window.claude && window.claude.use) {
+    const dl = await window.claude.use("downloads");
+    if (dl) {
+      try { await dl.save({ filename: backupName(), data: text }); toast("Backup saved"); }
+      catch (e) { if (!e || e.code !== "declined") toast("Couldn't save a file here. Use Copy backup instead."); }
+      return;
+    }
+    return copyData();
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  a.download = backupName(); document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function copyData() {
+  try { await navigator.clipboard.writeText(JSON.stringify(state)); toast("Backup copied. Paste it somewhere safe."); }
+  catch (e) { toast("Copying isn't allowed here. Use Save backup file."); }
+}
+function importData(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const data = JSON.parse(r.result);
+      if (!data || !Array.isArray(data.injections) || !Array.isArray(data.tests)) throw 0;
+      state = normalize(data); commit(); toast("Backup restored");
+    } catch (e) { toast("That file isn't an E-Tracker backup."); }
+  };
+  r.readAsText(file);
+}
+
+/* ---------- events ---------- */
+function armed(btn) {
+  if (btn.dataset.armed) return true;
+  btn.dataset.armed = "1"; btn.dataset.label = btn.textContent; btn.textContent = "Tap again to confirm";
+  setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; } }, 4000);
+  return false;
+}
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("[data-act]"); if (!b) return;
+  const act = b.dataset.act, id = b.dataset.id;
+  if (act === "go") location.hash = b.dataset.to;
+  else if (act === "new-inj") openInjection();
+  else if (act === "edit-inj") openInjection(id);
+  else if (act === "new-test") openTest();
+  else if (act === "edit-test") openTest(id);
+  else if (act === "close") dlg.close();
+  else if (act === "del-inj") { if (armed(b)) { state.injections = state.injections.filter(i => i.id !== id); dlg.close(); commit(); toast("Injection deleted"); } }
+  else if (act === "del-test") { if (armed(b)) { state.tests = state.tests.filter(t => t.id !== id); dlg.close(); commit(); toast("Blood test deleted"); } }
+  else if (act === "range") { state.settings.range = b.dataset.r; commit(); }
+  else if (act === "add-site") {
+    const inp = $("#site-new"), name = inp.value.trim().slice(0, 40);
+    if (name && !state.settings.sites.includes(name)) { state.settings.sites.push(name); commit(false); $("#sites-block").innerHTML = sitesBlock(); }
+    inp.value = "";
+  }
+  else if (act === "export") exportData();
+  else if (act === "copy") copyData();
+  else if (act === "import") $("#import-file").click();
+  else if (act === "erase") { if (armed(b)) { state = defaults(); commit(); toast("Everything erased"); } }
+});
+document.addEventListener("change", ev => {
+  const el = ev.target, s = state.settings;
+  if (el.id === "calib") { s.calibrate = el.checked; return commit(); }
+  if (el.id === "import-file") { if (el.files[0]) importData(el.files[0]); el.value = ""; return; }
+  if (el.dataset.site) {
+    const name = el.dataset.site;
+    if (el.checked) { const order = SITE_PRESETS.concat(s.sites); s.sites = order.filter((x, i) => order.indexOf(x) === i && (s.sites.includes(x) || x === name)); }
+    else s.sites = s.sites.filter(x => x !== name);
+    return commit(false);
+  }
+  if (!el.id || el.id.indexOf("set-") !== 0) return;
+  const num = () => { const n = parseNum(el.value); return n > 0 ? n : null; };
+  if (el.id === "set-ester") s.ester = el.value;
+  else if (el.id === "set-dose") { s.dose = num(); if (s.dose) state.setupDone = true; }
+  else if (el.id === "set-conc") s.conc = num();
+  else if (el.id === "set-weekday") s.weekday = Number(el.value);
+  else if (el.id === "set-time") s.time = el.value || "09:00";
+  else if (el.id === "set-steady") s.steady = el.checked;
+  else if (el.id === "set-tunit") s.tUnit = el.value;
+  else if (el.id === "set-e2unit") { s.e2Unit = el.value; commit(); return toast("Saved"); }
+  else if (el.id === "set-tlo") { const n = num(); s.targetLo = n == null ? null : n / e2Conv(); }
+  else if (el.id === "set-thi") { const n = num(); s.targetHi = n == null ? null : n / e2Conv(); }
+  commit(false); toast("Saved");
+});
+document.addEventListener("pointermove", ev => { if (ev.target.closest && ev.target.closest("#chart svg")) chartHover(ev); else chartLeave(); });
+document.addEventListener("pointerdown", ev => { if (ev.target.closest && ev.target.closest("#chart svg")) chartHover(ev); });
+dlg.addEventListener("click", ev => { if (ev.target === dlg) dlg.close(); });
+function route() {
+  const h = location.hash.replace("#", "");
+  tab = ["overview", "injections", "bloods", "regimen"].includes(h) ? h : "overview";
+  render();
+}
+window.addEventListener("hashchange", route);
+let rz = 0, lastW = 0;
+window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { const b = $("#chart"); if (b && b.clientWidth !== lastW) { lastW = b.clientWidth; drawChart(); } }, 120); });
+route();
+initCloud();
+</script>
+</body>
+</html>
